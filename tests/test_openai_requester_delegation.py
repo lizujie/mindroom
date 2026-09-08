@@ -216,6 +216,7 @@ def test_mapping_does_not_authenticate_revoked_key(api: _ApiHarness) -> None:
 
 def test_nested_delegation_retains_authority_and_denies_forbidden_target(api: _ApiHarness) -> None:
     """A specialist can delegate again but cannot acquire another requester's grants."""
+    api.config.agents["specialist"].delegate_to = ["forbidden"]
 
     async def parent(_ctx: ResponseTurnContext, *, execution_identity: ToolExecutionIdentity, **_kwargs: object) -> str:
         tool = DelegateTools("leader", ["specialist"], api.runtime_paths, api.config, execution_identity)
@@ -276,6 +277,30 @@ def test_delegation_rechecks_current_authorization(api: _ApiHarness, policy: str
         )
     assert response.status_code == 200
     assert "Cannot delegate" in response.text
+    child.assert_not_called()
+
+
+def test_delegation_rechecks_current_caller_allowlist(api: _ApiHarness) -> None:
+    """Hot reload revoking a caller's delegation edge stops an active API run."""
+
+    async def parent(_ctx: ResponseTurnContext, *, execution_identity: ToolExecutionIdentity, **_kwargs: object) -> str:
+        replacement = api.config.model_copy(deep=True)
+        replacement.agents["leader"].delegate_to = []
+        config_lifecycle.require_api_state(api.client.app).snapshot.runtime_config = replacement
+        tool = DelegateTools("leader", ["specialist"], api.runtime_paths, api.config, execution_identity)
+        return await tool.delegate_task("specialist", "help")
+
+    with (
+        patch.object(openai_compat, "ai_response", side_effect=parent),
+        patch("mindroom.custom_tools.delegate.ai_response", new_callable=AsyncMock) as child,
+    ):
+        response = api.client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer alice-key"},
+            json={"model": "leader", "messages": [{"role": "user", "content": "help"}]},
+        )
+    assert response.status_code == 200
+    assert "no longer an allowed target" in response.text
     child.assert_not_called()
 
 

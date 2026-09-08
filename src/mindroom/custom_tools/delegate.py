@@ -102,15 +102,17 @@ class DelegateTools(Toolkit):
             The delegated agent's response, or an error message if delegation failed.
 
         """
-        if agent_name not in self._delegate_to:
+        if agent_name not in self._delegate_to or not task or not task.strip():
             available = ", ".join(self._delegate_to)
-            return (
+            invalid_target_message = (
                 f"Cannot delegate to '{agent_name}'. Available agents: {available}. "
                 f"Run agents_list to inspect can_delegate flags."
             )
-
-        if not task or not task.strip():
-            return "Cannot delegate an empty task. Please provide a task description."
+            return (
+                "Cannot delegate an empty task. Please provide a task description."
+                if not task or not task.strip()
+                else invalid_target_message
+            )
 
         runtime_context = get_tool_runtime_context()
         detached_context = get_detached_requester_context()
@@ -132,19 +134,24 @@ class DelegateTools(Toolkit):
             membership_index = detached_context.agent_reply_memberships
         else:
             return f"Cannot delegate to '{agent_name}': requester authorization is unavailable."
-        if (
-            active_config is None
-            or agent_name not in active_config.agents
-            or not is_sender_allowed_for_responder(
-                requester_id,
-                agent_name,
-                authorization_room_id,
-                active_config,
-                self._runtime_paths,
-                membership_index,
-            )
-        ):
+        if active_config is None or agent_name not in active_config.agents:
             return f"Cannot delegate to '{agent_name}': that agent is not allowed to reply to you."
+        caller_config = active_config.agents.get(self._agent_name)
+        caller_allows_target = caller_config is not None and agent_name in caller_config.delegate_to
+        if not caller_allows_target or not is_sender_allowed_for_responder(
+            requester_id,
+            agent_name,
+            authorization_room_id,
+            active_config,
+            self._runtime_paths,
+            membership_index,
+        ):
+            reason = (
+                "it is no longer an allowed target"
+                if not caller_allows_target
+                else "that agent is not allowed to reply to you"
+            )
+            return f"Cannot delegate to '{agent_name}': {reason}."
 
         try:
             session_id = f"delegate:{self._agent_name}:{agent_name}:{uuid4()}"
