@@ -22,6 +22,7 @@ from mindroom.logging_config import get_logger
 from mindroom.tool_system.runtime_context import (
     ToolRuntimeContext,
     ToolRuntimeModelBinding,
+    get_detached_requester_context,
     get_tool_runtime_context,
     tool_runtime_context,
 )
@@ -112,16 +113,36 @@ class DelegateTools(Toolkit):
             return "Cannot delegate an empty task. Please provide a task description."
 
         runtime_context = get_tool_runtime_context()
-        active_config = runtime_context.current_config if runtime_context is not None else self._config
-        if runtime_context is None:
+        detached_context = get_detached_requester_context()
+        if runtime_context is not None:
+            active_config = runtime_context.current_config
+            requester_id = runtime_context.requester_id
+            authorization_room_id = runtime_context.room_id
+            membership_index = runtime_context.require_agent_reply_memberships()
+        elif (
+            detached_context is not None
+            and self._execution_identity is not None
+            and self._execution_identity.channel == "openai_compat"
+            and self._execution_identity.requester_id == detached_context.requester_id
+            and self._runtime_paths == detached_context.runtime_paths
+        ):
+            active_config = detached_context.current_config
+            requester_id = detached_context.requester_id
+            authorization_room_id = None
+            membership_index = detached_context.agent_reply_memberships
+        else:
             return f"Cannot delegate to '{agent_name}': requester authorization is unavailable."
-        if not is_sender_allowed_for_responder(
-            runtime_context.requester_id,
-            agent_name,
-            runtime_context.room_id,
-            active_config,
-            self._runtime_paths,
-            runtime_context.require_agent_reply_memberships(),
+        if (
+            active_config is None
+            or agent_name not in active_config.agents
+            or not is_sender_allowed_for_responder(
+                requester_id,
+                agent_name,
+                authorization_room_id,
+                active_config,
+                self._runtime_paths,
+                membership_index,
+            )
         ):
             return f"Cannot delegate to '{agent_name}': that agent is not allowed to reply to you."
 
@@ -148,6 +169,7 @@ class DelegateTools(Toolkit):
                 "Delegating task",
                 from_agent=self._agent_name,
                 to_agent=agent_name,
+                requester_id=requester_id,
                 depth=self._delegation_depth + 1,
                 task_preview=task[:100],
             )
@@ -195,6 +217,9 @@ class DelegateTools(Toolkit):
                     config=active_config,
                     knowledge=knowledge_resolution.knowledge,
                     include_interactive_questions=False,
+                    include_openai_compat_guidance=(
+                        execution_identity is not None and execution_identity.channel == "openai_compat"
+                    ),
                     tool_function_filter=(
                         runtime_context.tool_function_filter if runtime_context is not None else None
                     ),
