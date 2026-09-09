@@ -88,7 +88,7 @@ class DelegateTools(Toolkit):
             "The delegated agent runs independently with no shared conversation history."
         )
 
-    async def delegate_task(self, agent_name: str, task: str) -> str:
+    async def delegate_task(self, agent_name: str, task: str) -> str:  # noqa: PLR0911
         """Delegate a task to one allowed agent and return its response.
 
         The runtime-generated tool description lists caller-specific allowed
@@ -102,16 +102,14 @@ class DelegateTools(Toolkit):
             The delegated agent's response, or an error message if delegation failed.
 
         """
-        if agent_name not in self._delegate_to or not task or not task.strip():
+        if not task or not task.strip():
+            return "Cannot delegate an empty task. Please provide a task description."
+
+        if agent_name not in self._delegate_to:
             available = ", ".join(self._delegate_to)
-            invalid_target_message = (
+            return (
                 f"Cannot delegate to '{agent_name}'. Available agents: {available}. "
                 f"Run agents_list to inspect can_delegate flags."
-            )
-            return (
-                "Cannot delegate an empty task. Please provide a task description."
-                if not task or not task.strip()
-                else invalid_target_message
             )
 
         runtime_context = get_tool_runtime_context()
@@ -128,7 +126,7 @@ class DelegateTools(Toolkit):
             and self._execution_identity.requester_id == detached_context.requester_id
             and self._runtime_paths == detached_context.runtime_paths
         ):
-            active_config = detached_context.current_config
+            active_config = detached_context.config_provider()
             requester_id = detached_context.requester_id
             authorization_room_id = None
             membership_index = detached_context.agent_reply_memberships

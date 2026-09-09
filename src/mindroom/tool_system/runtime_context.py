@@ -69,12 +69,7 @@ class DetachedRequesterContext:
     config: Config
     runtime_paths: RuntimePaths
     agent_reply_memberships: AgentReplyMembershipIndex
-    config_provider: Callable[[], Config | None] | None = None
-
-    @property
-    def current_config(self) -> Config | None:
-        """Read current authorization policy, or deny if its runtime was replaced."""
-        return self.config_provider() if self.config_provider is not None else self.config
+    config_provider: Callable[[], Config | None]
 
 
 _DETACHED_REQUESTER_CONTEXT: ContextVar[DetachedRequesterContext | None] = ContextVar(
